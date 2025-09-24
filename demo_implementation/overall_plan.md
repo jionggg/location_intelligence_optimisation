@@ -6,9 +6,83 @@
 
 3. Construct the complete graphwith all edges, (using the hard coded version of position of anchors)
     - Simulate anchor - anchor edges inside the graph pose optimization (lets do a perfect version for now)
-4. Data handling, bin all the data from the last 1 second, take the average from each 
+4. Data handling, bin all the data from the last 1 second, take the average from each
 5. perform full PGO as per pgo_test.py to give compelte position (should update at 1hz)
     - The final output should be a simple (x,y,z) in cm of where the phone is in after PGO in the global coordinate
+
+## System Architecture Flow
+
+```mermaid
+graph TD
+    A[MQTT Time Series Data] --> B[DataIngestor<br/>ingest_data.py]
+    B --> C[Sliding Window<br/>1-second buffer]
+    C --> D[Bin & Average<br/>per anchor]
+    D --> E[Transform to Relative<br/>transform_to_global_vector.py]
+    E --> F[Graph Construction<br/>Nodes + Edges]
+
+    G[Anchor Positions<br/>create_anchor_edges.py] --> F
+    F --> H[Anchor-Anchor Edges<br/>6 perfect constraints]
+    F --> I[Anchor-Phone Edges<br/>averaged UWB measurements]
+
+    I --> J[3D Pose Graph Optimization<br/>pgo_3d.py - FUTURE]
+    H --> J
+    J --> K[Optimized Position<br/>(x,y,z) in cm]
+
+    K --> L[Real-time Output<br/>1Hz updates - FUTURE]
+
+    style A fill:#e1f5fe
+    style J fill:#fff3e0
+    style L fill:#fff3e0
+    style B fill:#c8e6c9
+    style C fill:#c8e6c9
+    style D fill:#c8e6c9
+    style E fill:#c8e6c9
+    style F fill:#c8e6c9
+    style G fill:#c8e6c9
+    style H fill:#c8e6c9
+    style I fill:#c8e6c9
+```
+
+**Legend:**
+- 🟢 **Completed**: Steps 2-4 implemented
+- 🟡 **Future**: Steps 1, 5-6 to implement
+
+## Implementation Status & Details
+
+### ✅ Step 2: Transform to Relative Measurements
+
+**What we built**: `transform_to_global_vector.py` with `create_relative_measurement()`
+- **Input**: Raw UWB vector in anchor's local coordinate system + anchor ID + phone node ID
+- **Processing**: Rotate vector from anchor's local frame to global coordinate system
+- **Output**: Relative displacement tuple `(anchor_node, phone_node, displacement_vector)`
+- **Key change**: Returns relative constraint, not absolute position
+- **Files**: `transform_to_global_vector.py` (rotation logic), `create_anchor_edges.py` (anchor definitions)
+
+### ✅ Step 3: Graph Construction with Anchor-Anchor Edges
+
+**What we built**: `create_anchor_anchor_edges()` function
+- **Purpose**: Creates perfect geometric constraints between anchor positions
+- **Implementation**: All 6 pairs (0-1, 0-2, 0-3, 1-2, 1-3, 2-3) with exact distances
+- **Format**: Same tuple format as relative measurements for consistency
+- **Benefit**: Provides geometric "loop closures" for better optimization stability
+- **Files**: `create_anchor_edges.py`
+
+### ✅ Step 4: Data Handling & 1-Second Binning
+
+**What we built**: `DataIngestor` class in `ingest_data.py`
+- **Sliding Window**: Maintains 1-second buffer of raw measurements
+- **Automatic Cleanup**: Removes measurements older than 1 second
+- **Binning Logic**: Groups measurements by anchor within current window
+- **Averaging**: Handles multiple measurements per anchor (variable sample rates)
+- **Graph Construction**: Combines anchor-phone edges + anchor-anchor edges
+- **Output Format**: `{'nodes': {...}, 'edges': [...], 'binned_data': ...}` ready for PGO
+- **Real-time Ready**: `get_latest_graph_data()` provides fresh data every second
+
+**Technical Details:**
+- Uses `collections.deque` for efficient sliding window
+- Handles missing data gracefully (uses only available anchors)
+- Generates unique node IDs (`phone_bin_1`, `phone_bin_2`, etc.)
+- Integrates all components: transforms + anchor edges + binning
 
 ## Detailed Implementation Plan
 
@@ -120,9 +194,9 @@ Using `pgo_test.py` approach but extended to 3D:
 
 ### Implementation Priority:
 
-1. **Fix `transform_to_global_vector.py`** → Return relative measurements, not absolute positions
-2. **Implement 1-second data binning** → Collect, average, and timestamp measurements
-3. **Create graph construction module** → Build nodes and edges (including anchor-anchor edges)
-4. **Extend `pgo_test.py`** → Support 3D, fixed anchor nodes, real-time 1Hz updates
-5. **Add temporal edges** → Optional: connect consecutive phone poses for smoothness
-6. **Implement real-time output** → (x,y,z) position publishing at 1Hz
+✅ 1. **Fix `transform_to_global_vector.py`** → Return relative measurements, not absolute positions
+✅ 2. **Implement 1-second data binning** → Collect, average, and timestamp measurements
+✅ 3. **Create graph construction module** → Build nodes and edges (including anchor-anchor edges)
+🟡 4. **Extend `pgo_test.py`** → Support 3D, fixed anchor nodes, real-time 1Hz updates
+🟡 5. **Add temporal edges** → Optional: connect consecutive phone poses for smoothness
+🟡 6. **Implement real-time output** → (x,y,z) position publishing at 1Hz

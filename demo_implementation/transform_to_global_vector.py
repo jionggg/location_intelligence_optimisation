@@ -1,5 +1,5 @@
 import numpy as np
-from create_anchor_edges import ANCHORS, create_anchor_anchor_edges
+from create_anchor_edges import ANCHORS
 
 # 45° "facing into the room" yaw for each board; local x points along heading into the room,
 # local y is left of the board, z is up. Rotation is about +z only.
