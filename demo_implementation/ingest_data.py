@@ -171,6 +171,8 @@ class DataIngestor:
 def apply_anchoring_transformation(optimized_nodes: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
     """
     Apply anchoring transformation to align optimized positions with known anchor positions.
+    Uses a proper 3D similarity transformation (translation + rotation + scaling) to align
+    anchor_3 to origin and anchor_0 to its true position.
 
     Args:
         optimized_nodes: Dict of optimized node positions from PGO
@@ -185,21 +187,90 @@ def apply_anchoring_transformation(optimized_nodes: Dict[str, np.ndarray]) -> Di
     if opt_anchor_3 is None or opt_anchor_0 is None:
         raise ValueError("Optimized anchor positions not found")
 
-    # Calculate transformation to align with known anchor positions
-    # Anchor 3 should be at (0,0,0)
-    # Anchor 0 should be at ANCHORS[0] (top-right)
+    # Target positions
+    target_anchor_3 = ANCHORS[3]  # (0,0,0)
+    target_anchor_0 = ANCHORS[0]  # (440,550,0)
 
-    translation = -opt_anchor_3  # Move anchor_3 to origin
-    transformed_nodes = {}
-
-    # Apply translation to all nodes
+    # Step 1: Translate so anchor_3 is at origin
+    translation = -opt_anchor_3
+    translated_nodes = {}
     for node_id, position in optimized_nodes.items():
         if position is not None:
-            transformed_nodes[node_id] = position + translation
+            translated_nodes[node_id] = position + translation
 
-    # Force known anchors to their exact positions
+    # After translation, anchor_3 should be at origin
+    translated_anchor_0 = translated_nodes['anchor_0']
+    
+    # Step 2: Calculate scale factor
+    # Distance between optimized anchors 0 and 3
+    opt_distance = np.linalg.norm(translated_anchor_0)
+    # True distance between anchors 0 and 3
+    true_distance = np.linalg.norm(target_anchor_0 - target_anchor_3)
+    
+    if opt_distance > 1e-6:  # Avoid division by zero
+        scale_factor = true_distance / opt_distance
+    else:
+        scale_factor = 1.0
+    
+    # Step 3: Calculate rotation
+    # We need to rotate translated_anchor_0 to align with target_anchor_0
+    if opt_distance > 1e-6:
+        # Normalized vectors
+        opt_direction = translated_anchor_0 / opt_distance
+        target_direction = target_anchor_0 / true_distance
+        
+        # Calculate rotation matrix using Rodrigues' rotation formula
+        # For 2D case (Z components are 0), we can use a simple 2D rotation
+        if abs(opt_direction[2]) < 1e-6 and abs(target_direction[2]) < 1e-6:
+            # 2D rotation in XY plane
+            opt_angle = np.arctan2(opt_direction[1], opt_direction[0])
+            target_angle = np.arctan2(target_direction[1], target_direction[0])
+            rotation_angle = target_angle - opt_angle
+            
+            cos_theta = np.cos(rotation_angle)
+            sin_theta = np.sin(rotation_angle)
+            
+            rotation_matrix = np.array([
+                [cos_theta, -sin_theta, 0],
+                [sin_theta,  cos_theta, 0],
+                [0,          0,         1]
+            ])
+        else:
+            # 3D rotation using cross product
+            v = np.cross(opt_direction, target_direction)
+            s = np.linalg.norm(v)
+            c = np.dot(opt_direction, target_direction)
+            
+            if s < 1e-6:  # Vectors are parallel
+                if c > 0:
+                    rotation_matrix = np.eye(3)
+                else:
+                    rotation_matrix = -np.eye(3)
+            else:
+                vx = np.array([[0, -v[2], v[1]],
+                              [v[2], 0, -v[0]],
+                              [-v[1], v[0], 0]])
+                rotation_matrix = np.eye(3) + vx + np.dot(vx, vx) * ((1 - c) / (s * s))
+    else:
+        rotation_matrix = np.eye(3)
+
+    # Step 4: Apply scale and rotation to all nodes
+    transformed_nodes = {}
+    for node_id, position in translated_nodes.items():
+        if position is not None:
+            # Apply scaling
+            scaled_pos = position * scale_factor
+            # Apply rotation
+            rotated_pos = rotation_matrix @ scaled_pos
+            transformed_nodes[node_id] = rotated_pos
+
+    # Step 5: Force known anchors to their exact positions (remove numerical errors)
     transformed_nodes['anchor_3'] = ANCHORS[3]  # (0,0,0)
-    transformed_nodes['anchor_0'] = ANCHORS[0]  # top-right
+    transformed_nodes['anchor_0'] = ANCHORS[0]  # (440,550,0)
+    
+    # Also fix other anchors to their known positions
+    transformed_nodes['anchor_1'] = ANCHORS[1]  # (0,550,0)
+    transformed_nodes['anchor_2'] = ANCHORS[2]  # (440,0,0)
 
     return transformed_nodes
 
