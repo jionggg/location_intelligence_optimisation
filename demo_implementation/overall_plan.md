@@ -74,7 +74,8 @@ graph TD
 - **Automatic Cleanup**: Removes measurements older than 1 second
 - **Binning Logic**: Groups measurements by anchor within current window
 - **Averaging**: Handles multiple measurements per anchor (variable sample rates)
-- **Graph Construction**: Combines anchor-phone edges + anchor-anchor edges
+- **Graph Construction**: Creates **floating nodes** (all None initially) + relative edges
+- **Anchoring**: Post-PGO transformation using `apply_anchoring_transformation()`
 - **Output Format**: `{'nodes': {...}, 'edges': [...], 'binned_data': ...}` ready for PGO
 - **Real-time Ready**: `get_latest_graph_data()` provides fresh data every second
 
@@ -82,6 +83,7 @@ graph TD
 - Uses `collections.deque` for efficient sliding window
 - Handles missing data gracefully (uses only available anchors)
 - Generates unique node IDs (`phone_bin_1`, `phone_bin_2`, etc.)
+- **Anchors are floating** during optimization, pinned to known positions afterward
 - Integrates all components: transforms + anchor edges + binning
 
 ## Detailed Implementation Plan

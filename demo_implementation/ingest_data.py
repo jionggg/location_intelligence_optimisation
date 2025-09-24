@@ -128,12 +128,13 @@ class DataIngestor:
         Returns:
             Dict with 'nodes' and 'edges' ready for PGO
         """
-        # Nodes: anchors (fixed) + phone pose (to optimize)
+        # Nodes: anchors (floating) + phone pose (to optimize)
+        # Anchors start floating - their positions will be determined by anchor-anchor edges
         nodes = {
-            'anchor_0': ANCHORS[0],  # fixed positions
-            'anchor_1': ANCHORS[1],
-            'anchor_2': ANCHORS[2],
-            'anchor_3': ANCHORS[3],
+            'anchor_0': None,  # floating - constrained by edges
+            'anchor_1': None,  # floating - constrained by edges
+            'anchor_2': None,  # floating - constrained by edges
+            'anchor_3': None,  # floating - will be pinned in PGO solver
             binned_data.phone_node_id: None  # unknown, to be optimized
         }
 
@@ -144,7 +145,7 @@ class DataIngestor:
         anchor_phone_edges = binned_data.get_averaged_measurements()
         edges.extend(anchor_phone_edges)
 
-        # Add anchor-anchor edges (perfect constraints)
+        # Add anchor-anchor edges (perfect constraints between anchors)
         edges.extend(self.anchor_anchor_edges)
 
         return {
@@ -165,6 +166,60 @@ class DataIngestor:
             return None
 
         return self.create_graph_data(binned_data)
+
+
+def apply_anchoring_transformation(optimized_nodes: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    """
+    Apply anchoring transformation to align optimized positions with known anchor positions.
+
+    Args:
+        optimized_nodes: Dict of optimized node positions from PGO
+
+    Returns:
+        Dict of anchored positions where known anchors are fixed to their true positions
+    """
+    # Extract optimized anchor positions
+    opt_anchor_3 = optimized_nodes.get('anchor_3')
+    opt_anchor_0 = optimized_nodes.get('anchor_0')
+
+    if opt_anchor_3 is None or opt_anchor_0 is None:
+        raise ValueError("Optimized anchor positions not found")
+
+    # Calculate transformation to align with known anchor positions
+    # Anchor 3 should be at (0,0,0)
+    # Anchor 0 should be at ANCHORS[0] (top-right)
+
+    translation = -opt_anchor_3  # Move anchor_3 to origin
+    transformed_nodes = {}
+
+    # Apply translation to all nodes
+    for node_id, position in optimized_nodes.items():
+        if position is not None:
+            transformed_nodes[node_id] = position + translation
+
+    # Force known anchors to their exact positions
+    transformed_nodes['anchor_3'] = ANCHORS[3]  # (0,0,0)
+    transformed_nodes['anchor_0'] = ANCHORS[0]  # top-right
+
+    return transformed_nodes
+
+
+def extract_phone_position(anchored_nodes: Dict[str, np.ndarray], phone_node_id: str) -> Tuple[float, float, float]:
+    """
+    Extract the final phone position from anchored nodes.
+
+    Args:
+        anchored_nodes: Dict of anchored node positions
+        phone_node_id: ID of the phone node to extract
+
+    Returns:
+        Tuple of (x, y, z) position in cm
+    """
+    position = anchored_nodes.get(phone_node_id)
+    if position is None:
+        raise ValueError(f"Phone position not found for node {phone_node_id}")
+
+    return (float(position[0]), float(position[1]), float(position[2]))
 
 
 # Example usage and testing
@@ -195,7 +250,12 @@ if __name__ == "__main__":
 
     if graph_data:
         print(f"\nNodes: {list(graph_data['nodes'].keys())}")
-        print(f"Number of edges: {len(graph_data['edges'])}")
+        print("Node positions (None = floating, to be optimized):")
+        for node_id, position in graph_data['nodes'].items():
+            status = "FLOATING" if position is None else f"FIXED at {position}"
+            print(f"  {node_id}: {status}")
+
+        print(f"\nNumber of edges: {len(graph_data['edges'])}")
 
         print("\nAnchor-phone edges:")
         for edge in graph_data['edges']:
@@ -210,5 +270,32 @@ if __name__ == "__main__":
         print(f"  {anchor_edges_count} anchor-anchor edges included")
 
         print(f"\nBinned data contains measurements from {len(graph_data['binned_data'].measurements)} anchors")
+
+        # Test anchoring functions
+        print("\n--- Testing Anchoring Functions ---")
+
+        # Simulate PGO results (normally from PGO solver)
+        simulated_pgo_results = {
+            'anchor_0': np.array([100.0, 200.0, 0.0]),  # Simulated optimized position
+            'anchor_1': np.array([50.0, 200.0, 0.0]),
+            'anchor_2': np.array([100.0, 50.0, 0.0]),
+            'anchor_3': np.array([50.0, 50.0, 0.0]),    # Simulated optimized position
+            'phone_bin_1': np.array([75.0, 125.0, 10.0]) # Simulated phone position
+        }
+
+        print("Simulated PGO results:")
+        for node_id, pos in simulated_pgo_results.items():
+            print(f"  {node_id}: {pos}")
+
+        # Apply anchoring transformation
+        anchored_results = apply_anchoring_transformation(simulated_pgo_results)
+        print("\nAfter anchoring transformation:")
+        for node_id, pos in anchored_results.items():
+            print(f"  {node_id}: {pos}")
+
+        # Extract phone position
+        phone_x, phone_y, phone_z = extract_phone_position(anchored_results, 'phone_bin_1')
+        print(f"\nFinal phone position: ({phone_x:.1f}, {phone_y:.1f}, {phone_z:.1f}) cm")
+
     else:
         print("No graph data available")
