@@ -110,8 +110,8 @@ def plot_static(X_opt: np.ndarray, out_png: str):
     for idx in [0, 1, 2, 3]:
         ax.text(ANCHORS[idx][0], ANCHORS[idx][1], f"A{idx}", ha="left", va="bottom")
 
-    # trajectory (top-down XY)
-    ax.plot(X_opt[:, 0], X_opt[:, 1], linewidth=1.5, label="Optimised")
+    # trajectory (top-down XY) - show as points for clustering visualization
+    ax.scatter(X_opt[:, 0], X_opt[:, 1], s=20, alpha=0.7, label="Optimised positions")
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(-20, ROOM_W + 20); ax.set_ylim(-20, ROOM_H + 20)
     ax.set_xlabel("X (cm)"); ax.set_ylabel("Y (cm)")
@@ -145,23 +145,24 @@ def save_animation(X_opt: np.ndarray, out_mp4: str, fps: int):
     for idx in [0, 1, 2, 3]:
         ax.text(ANCHORS[idx][0], ANCHORS[idx][1], f"A{idx}", ha="left", va="bottom")
 
-    path_line, = ax.plot([], [], linewidth=1.5, label="Optimised")
-    point, = ax.plot([], [], marker="o", markersize=5)  # Line2D; feed lists
+    path_points = ax.scatter([], [], s=20, alpha=0.7, label="Optimised positions")
+    current_point, = ax.plot([], [], marker="o", markersize=8, color='red')  # Current position
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(-20, ROOM_W + 20); ax.set_ylim(-20, ROOM_H + 20)
     ax.set_xlabel("X (cm)"); ax.set_ylabel("Y (cm)")
     ax.set_title("iPhone trajectory over time"); ax.legend()
 
     def init():
-        path_line.set_data([], [])
-        point.set_data([], [])
-        return path_line, point
+        path_points.set_offsets(np.empty((0, 2)))  # Empty array for scatter
+        current_point.set_data([], [])
+        return path_points, current_point
 
     def update(f):
-        path_line.set_data(X_anim[:f+1, 0], X_anim[:f+1, 1])
-        # IMPORTANT: pass sequences to Line2D.set_data
-        point.set_data([X_anim[f, 0]], [X_anim[f, 1]])
-        return path_line, point
+        # Update scatter points for all positions up to current frame
+        path_points.set_offsets(X_anim[:f+1])
+        # Update current position marker
+        current_point.set_data([X_anim[f, 0]], [X_anim[f, 1]])
+        return path_points, current_point
 
     anim = animation.FuncAnimation(
         fig, update, init_func=init,
