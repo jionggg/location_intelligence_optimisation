@@ -1,19 +1,5 @@
 import numpy as np
-
-# -----------------------------
-# Room/grid geometry (cm)
-# -----------------------------
-SQUARE_CM = 55.0
-NX, NY = 8, 10 
-ROOM_W, ROOM_H = NX * SQUARE_CM, NY * SQUARE_CM
-
-# Anchor positions in global frame (x right, y up), origin at Anchor 3 (bottom-left)
-ANCHORS = {
-    0: np.array([ROOM_W, ROOM_H, 0.0]),  # top-right
-    1: np.array([0.0,     ROOM_H, 0.0]), # top-left
-    2: np.array([ROOM_W,  0.0,    0.0]), # bottom-right
-    3: np.array([0.0,     0.0,    0.0]), # bottom-left (origin)
-}
+from create_anchor_edges import ANCHORS, create_anchor_anchor_edges
 
 # 45° "facing into the room" yaw for each board; local x points along heading into the room,
 # local y is left of the board, z is up. Rotation is about +z only.
@@ -30,16 +16,18 @@ ANCHOR_R = {
     3: Rz(45.0),   # bottom-left  faces top-right
 }
 
-def transform_to_global_vector(anchor_id: int, local_vector: np.ndarray) -> np.ndarray:
+def create_relative_measurement(anchor_id: int, phone_node_id: str, local_vector: np.ndarray) -> tuple:
     """
-    Transform a local vector from an anchor's coordinate system to global coordinates.
+    Create a relative measurement (edge) between an anchor and phone node.
 
     Args:
         anchor_id (int): ID of the anchor (0-3)
+        phone_node_id (str): Identifier for the phone pose node (e.g., 'phone_t1')
         local_vector (np.ndarray): Local vector in anchor's coordinate system (x, y, z) in cm
 
     Returns:
-        np.ndarray: Global position vector (x, y, z) in cm
+        tuple: (anchor_node, phone_node, displacement_vector) where displacement_vector
+               is the relative displacement from anchor to phone in global coordinates
 
     Raises:
         ValueError: If anchor_id is not in range 0-3 or local_vector is not 3D
@@ -53,20 +41,21 @@ def transform_to_global_vector(anchor_id: int, local_vector: np.ndarray) -> np.n
     # Rotate from local anchor coordinates to global XY
     v_global = ANCHOR_R[anchor_id] @ local_vector
 
-    # Add anchor's global position
-    global_position = ANCHORS[anchor_id] + v_global
+    # Return relative measurement: (anchor_node, phone_node, displacement)
+    anchor_node = f"anchor_{anchor_id}"
+    return (anchor_node, phone_node_id, v_global)
 
-    return global_position
 
 # Example usage
 if __name__ == "__main__":
-    # Example: transform a local vector [10, 20, 5] cm from anchor 3
+    # Example: create relative measurement from anchor 3 to phone at time 1
     local_vec = np.array([10.0, 20.0, 5.0])  # cm
-    global_pos = transform_to_global_vector(3, local_vec)
+    relative_edge = create_relative_measurement(3, "phone_t1", local_vec)
     print(f"Local vector from anchor 3: {local_vec}")
-    print(f"Global position: {global_pos}")
+    print(f"Relative measurement: {relative_edge}")
 
     # Test all anchors
+    print("\nAnchor-phone relative measurements:")
     for anchor_id in range(4):
-        global_pos = transform_to_global_vector(anchor_id, local_vec)
-        print(f"Anchor {anchor_id}: {global_pos}")
+        relative_edge = create_relative_measurement(anchor_id, "phone_t1", local_vec)
+        print(f"Anchor {anchor_id}: {relative_edge}")
