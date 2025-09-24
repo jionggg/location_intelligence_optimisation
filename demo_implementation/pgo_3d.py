@@ -115,19 +115,23 @@ def solve_pose_graph_3d(graph_data: Dict, anchored_nodes: Optional[Dict[str, np.
 def create_anchor_anchoring(anchor_3_pos: np.ndarray, anchor_0_pos: np.ndarray) -> Dict[str, np.ndarray]:
     """
     Create anchoring configuration for PGO.
-    Fixes anchor_3 at origin and lets other anchors float.
+    Fixes anchor_3 at origin and anchor_2 at its true position to prevent rotation.
 
     Args:
         anchor_3_pos: Known position of anchor_3 (will be mapped to origin)
         anchor_0_pos: Known position of anchor_0
 
     Returns:
-        Dict with anchor_3 fixed at origin
+        Dict with anchor_3 and anchor_2 fixed to prevent gauge freedom and rotation
     """
-    # For now, we'll anchor anchor_3 to origin to fix gauge freedom
-    # The transformation will be applied after PGO using apply_anchoring_transformation
+    # Import ANCHORS here to avoid circular imports
+    from create_anchor_edges import ANCHORS
+    
+    # Anchor both anchor_3 and anchor_2 to fully constrain the system
+    # This prevents both translation and rotation
     return {
-        'anchor_3': np.array([0.0, 0.0, 0.0])  # Fix gauge freedom
+        'anchor_3': ANCHORS[3],  # (0,0,0) - fix translation
+        'anchor_2': ANCHORS[2]   # (440,0,0) - fix rotation around anchor_3
     }
 
 

@@ -171,14 +171,14 @@ class DataIngestor:
 def apply_anchoring_transformation(optimized_nodes: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
     """
     Apply anchoring transformation to align optimized positions with known anchor positions.
-    Uses a proper 3D similarity transformation (translation + rotation + scaling) to align
-    anchor_3 to origin and anchor_0 to its true position.
+    Since we now anchor both anchor_3 and anchor_2 during PGO, this function mainly
+    ensures all anchors are at their exact known positions.
 
     Args:
         optimized_nodes: Dict of optimized node positions from PGO
 
     Returns:
-        Dict of anchored positions where known anchors are fixed to their true positions
+        Dict of anchored positions where all anchors are fixed to their true positions
     """
     # Extract optimized anchor positions
     opt_anchor_3 = optimized_nodes.get('anchor_3')
