@@ -8,12 +8,100 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
+import json, time, signal, sys
+from datetime import datetime
+import paho.mqtt.client as mqtt
+
+# ====== mqtt configs ======
+MQTT_BROKER = "192.168.99.3"
+MQTT_PORT = 1883
+MQTT_USERNAME = "laptop"
+MQTT_PASSWORD = "laptop"
+MQTT_CLIENT_ID = "uwb_pgo_subscriber"
+
+MQTT_BASE_TOPIC = "uwb"
+MQTT_QOS = 0
+MQTT_KEEPALIVE = 60
+WINDOW_MS = 120       # align anchors within 120 ms
+MIN_ANCHORS = 1       # accept frame even if only 1 anchor arrived
+MAX_FRAMES = 2000     # stop collecting after N frames (or Ctrl+C)
+
+class LiveVectorCollector:
+    def __init__(self):
+        self.records = []
+    def add(self, rec: dict):
+        self.records.append(rec)
+
+
+# =======mqtt connections=======
+def _on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        topic = f"{MQTT_BASE_TOPIC}/anchor/+/vector"
+        client.subscribe(topic, qos=MQTT_QOS)
+        print(f"✓ MQTT connected, subscribed: {topic}")
+    else:
+        print(f"✗ MQTT connect failed rc={rc}")
+
+
+def on_disconnect(client, userdata, rc):
+    print("✗ Disconnected from MQTT broker")
+
+# def on_message(client, userdata, msg):
+#     try:
+#         topic_parts = msg.topic.split('/')
+#         if len(topic_parts) >= 4 and topic_parts[-1] == "vector":
+#             anchor_id = int(topic_parts[-2])
+#             data = json.loads(msg.payload.decode('utf-8'))
+#             data['_anchor_id'] = anchor_id
+#             data['_received_time'] = time.time()
+#             # -> hand off to your frame builder (added below)
+#             userdata['ingest'](data)
+#     except Exception as e:
+#         print(f"✗ Error parsing message: {e}")
+def _on_message(client, userdata, msg):
+    try:
+        parts = msg.topic.split('/')
+        if len(parts) >= 4 and parts[-1] == 'vector' and parts[-3] == 'anchor':
+            anchor_id = int(parts[-2])
+        else:
+            return
+        recv_time_s = time.time()
+        payload = json.loads(msg.payload.decode('utf-8'))
+        rec = _record_from_msg(anchor_id, payload, recv_time_s)
+        if rec is None:
+            return  # skip if vector missing
+        userdata['collector'].add(rec)
+        print(rec, flush=True) #print each record as it arrives
+        # If you prefer single-line JSON:
+        # print(json.dumps(rec, ensure_ascii=False), flush=True)
+    except Exception as e:
+        print(f"✗ on_message error: {e}", flush=True)
+
+
+# =========mqtt connection helpers========
+def connect_mqtt(collector: LiveVectorCollector):
+    # Pin to MQTT v3.1.1 so v1-style callbacks are OK (silences the deprecation warning)
+    client = mqtt.Client(client_id=MQTT_CLIENT_ID, userdata={'collector': collector},
+                         protocol=mqtt.MQTTv311)
+    if MQTT_USERNAME and MQTT_PASSWORD:
+        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+    client.on_connect = _on_connect
+    client.on_message = _on_message
+    client.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
+    client.loop_start()
+    return client
+
+
+def disconnect_mqtt(client):
+    client.loop_stop()
+    client.disconnect()
+# ========end of mqtt stuff========
 
 # -----------------------------
 # Room/grid geometry (cm)
 # -----------------------------
 SQUARE_CM = 55.0
-NX, NY = 8, 10 #11, 9
+NX, NY = 8, 10
 ROOM_W, ROOM_H = NX * SQUARE_CM, NY * SQUARE_CM
 
 # Anchor positions in global frame (x right, y up), origin at Anchor 3 (bottom-left)
@@ -181,40 +269,71 @@ def save_animation(X_opt: np.ndarray, out_mp4: str, fps: int):
     plt.close(fig)
     return saved_path
 
+def _record_from_msg(anchor_id: int, data: dict, recv_time_s: float):
+    # timestamp: prefer device t_unix_ns, else received time
+    if 't_unix_ns' in data and isinstance(data['t_unix_ns'], (int, float)):
+        ts_ns = int(data['t_unix_ns'])
+        ts_readable = datetime.fromtimestamp(ts_ns / 1e9).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    else:
+        ts_readable = datetime.fromtimestamp(recv_time_s).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    v = data.get('vector_local') or {}
+    return {
+        "timestamp": ts_readable,
+        "anchor_id": int(anchor_id),
+        "local_vector_x": float(v.get('x', float('nan'))),
+        "local_vector_y": float(v.get('y', float('nan'))),
+        "local_vector_z": float(v.get('z', float('nan'))),
+    }
+
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--csv", required=True, help="Path to uwb_data_*.csv")
-    ap.add_argument("--outdir", default=".", help="Output directory")
-    ap.add_argument("--fps", type=int, default=20, help="Animation frames per second")
+    # Either CSV or MQTT, not both
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--csv", help="Path to uwb_data_*.csv")
+    src.add_argument("--mqtt", action="store_true",
+                    help="Read vectors live from MQTT instead of CSV")
     args = ap.parse_args()
 
-    csv_path = args.csv
-    if not os.path.isfile(csv_path):
-        raise FileNotFoundError(f"CSV not found: {csv_path}")
+    if args.mqtt:
+        collector = LiveVectorCollector()
+        client = connect_mqtt(collector)
+        print("▶ Reading live MQTT vectors… Press Ctrl+C to stop.")
+        try:
+            while True:
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            pass
+        disconnect_mqtt(client)
 
-    os.makedirs(args.outdir, exist_ok=True)
-    kept_ts, pred_pos = load_vectors(csv_path)
-    X_opt, cost = optimise(pred_pos)
 
-    # Save CSV
-    out_csv = os.path.join(args.outdir, "iphone_trajectory_optimised.csv")
-    pd.DataFrame({
-        "timestamp_readable": kept_ts,
-        "x_cm": X_opt[:, 0],
-        "y_cm": X_opt[:, 1],
-        "z_cm": X_opt[:, 2],
-    }).to_csv(out_csv, index=False)
+    # csv_path = args.csv
+    # if not os.path.isfile(csv_path):
+    #     raise FileNotFoundError(f"CSV not found: {csv_path}")
 
-    # Save static and animation
-    out_png = os.path.join(args.outdir, "iphone_trajectory_static.png")
-    plot_static(X_opt, out_png)
-    out_mp4 = os.path.join(args.outdir, "iphone_trajectory_animation.mp4")
-    out_anim = save_animation(X_opt, out_mp4, fps=args.fps)
+    # os.makedirs(args.outdir, exist_ok=True)
+    # kept_ts, pred_pos = load_vectors(csv_path)
+    # X_opt, cost = optimise(pred_pos)
 
-    print(f"\nOptimisation frames: {len(X_opt)}")
-    print(f"Residual cost (sum of squared cm errors): {cost:.3f}")
-    print(f"Saved:\n  {out_csv}\n  {out_png}\n  {out_anim}")
+    # # Save CSV
+    # out_csv = os.path.join(args.outdir, "iphone_trajectory_optimised.csv")
+    # pd.DataFrame({
+    #     "timestamp_readable": kept_ts,
+    #     "x_cm": X_opt[:, 0],
+    #     "y_cm": X_opt[:, 1],
+    #     "z_cm": X_opt[:, 2],
+    # }).to_csv(out_csv, index=False)
+
+    # # Save static and animation
+    # out_png = os.path.join(args.outdir, "iphone_trajectory_static.png")
+    # plot_static(X_opt, out_png)
+    # out_mp4 = os.path.join(args.outdir, "iphone_trajectory_animation.mp4")
+    # out_anim = save_animation(X_opt, out_mp4, fps=args.fps)
+
+    # print(f"\nOptimisation frames: {len(X_opt)}")
+    # print(f"Residual cost (sum of squared cm errors): {cost:.3f}")
+    # print(f"Saved:\n  {out_csv}\n  {out_png}\n  {out_anim}")
 
 if __name__ == "__main__":
     main()
+
