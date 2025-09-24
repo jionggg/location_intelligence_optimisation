@@ -14,21 +14,21 @@
 
 ```mermaid
 graph TD
-    A[MQTT Time Series Data] --> B[DataIngestor<br/>ingest_data.py]
-    B --> C[Sliding Window<br/>1-second buffer]
-    C --> D[Bin & Average<br/>per anchor]
-    D --> E[Transform to Relative<br/>transform_to_global_vector.py]
-    E --> F[Graph Construction<br/>Nodes + Edges]
+    A["MQTT Time Series Data"] --> B["DataIngestor\ningest_data.py"]
+    B --> C["Sliding Window\n1-second buffer"]
+    C --> D["Bin & Average\nper anchor"]
+    D --> E["Transform to Relative\ntransform_to_global_vector.py"]
+    E --> F["Graph Construction\nNodes + Edges"]
 
-    G[Anchor Positions<br/>create_anchor_edges.py] --> F
-    F --> H[Anchor-Anchor Edges<br/>6 perfect constraints]
-    F --> I[Anchor-Phone Edges<br/>averaged UWB measurements]
+    G["Anchor Positions\ncreate_anchor_edges.py"] --> F
+    F --> H["Anchor-Anchor Edges\n6 perfect constraints"]
+    F --> I["Anchor-Phone Edges\naveraged UWB measurements"]
 
-    I --> J[3D Pose Graph Optimization<br/>pgo_3d.py - FUTURE]
+    I --> J["3D Pose Graph Optimization\npgo_3d.py - FUTURE"]
     H --> J
-    J --> K[Optimized Position<br/>(x,y,z) in cm]
+    J --> K["Optimized Position\n(x,y,z) in cm"]
 
-    K --> L[Real-time Output<br/>1Hz updates - FUTURE]
+    K --> L["Real-time Output\n1Hz updates - FUTURE"]
 
     style A fill:#e1f5fe
     style J fill:#fff3e0
