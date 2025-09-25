@@ -51,10 +51,11 @@ graph TD
 
 **Successfully tested the entire PGO pipeline** using real UWB data from `uwb_data_A_20250916_175743.csv`:
 
-- **Input**: 20 CSV rows → 20 UWB measurements from 4 anchors
+- **Input**: Multiple datasets (20 rows each) → 20 UWB measurements from 4 anchors
 - **Processing**: DataIngestor → 3D PGO → Anchoring transformation
-- **Output**: Phone position (1446.3, 1112.4, 1092.4) cm + visualization plot
-- **Result**: Complete end-to-end pipeline working with real-world data!
+- **Anchoring**: Fixed anchor_3 at (0,0,0) + anchor_2 at (440,0,0) to prevent rotation
+- **Output**: Stable phone positions across different time periods + visualization plot
+- **Results**: Much more consistent positioning, no wild rotations, positions within expected ranges
 
 ## Implementation Status & Details
 
